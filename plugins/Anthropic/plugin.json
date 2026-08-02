@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "id": "Anthropic",
+  "name": "Anthropic",
+  "version": "0.1.0",
+  "sdk_abi": "revlm-plugin-cpp-v1",
+  "requires": [],
+  "targets": [
+    { "os": "linux", "arch": "amd64", "module": "backend/linux-amd64/libAnthropic.so" },
+    { "os": "linux", "arch": "arm64", "module": "backend/linux-arm64/libAnthropic.so" }
+  ],
+  "frontend_schema": "frontend/channel-types.json",
+  "migrations": []
+}

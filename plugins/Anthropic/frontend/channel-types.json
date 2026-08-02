@@ -1,0 +1,42 @@
+{
+  "channel_types": [
+    {
+      "type": "anthropic",
+      "name": "Anthropic",
+      "icon": "ri-sparkling-2-line",
+      "default_name": "Anthropic 渠道",
+      "default_base_url": "https://api.anthropic.com",
+      "schema": {
+        "fields": [
+          {
+            "key": "base_url",
+            "binding": "base_url",
+            "type": "text",
+            "label": "接口基础地址",
+            "default": "https://api.anthropic.com",
+            "required": true,
+            "order": 10
+          },
+          {
+            "key": "api_key",
+            "binding": "api_key",
+            "type": "secret",
+            "label": "API 密钥",
+            "description": "作为 x-api-key 转发给 Anthropic 上游。",
+            "required": true,
+            "order": 20
+          },
+          {
+            "key": "price_multiplier",
+            "binding": "price_multiplier",
+            "type": "number",
+            "label": "价格倍率",
+            "default": 1,
+            "required": true,
+            "order": 30
+          }
+        ]
+      }
+    }
+  ]
+}

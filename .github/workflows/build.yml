@@ -1,0 +1,26 @@
+name: build-plugin-packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  source-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate manifests and schemas
+        run: |
+          python3 -m json.tool plugins/OpenAI/plugin.json >/dev/null
+          python3 -m json.tool plugins/Anthropic/plugin.json >/dev/null
+          python3 -m json.tool plugins/OpenAI/frontend/channel-types.json >/dev/null
+          python3 -m json.tool plugins/Anthropic/frontend/channel-types.json >/dev/null
+      - name: Check packaging entry point
+        run: python3 packaging/build-package.py --help
+
+# Release CI receives a matching RevlmPluginSDK install for each architecture
+# from the Revlm release workflow, then builds native .so files and invokes the
+# packaging script with both artifacts. Keeping that hand-off explicit is the
+# ABI lock: a plugin package is never built against an arbitrary host version.

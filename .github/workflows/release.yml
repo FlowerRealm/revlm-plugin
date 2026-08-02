@@ -1,0 +1,80 @@
+name: release-plugin-packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag to create or update, for example v0.1.0
+        required: true
+        type: string
+      sdk_amd64_url:
+        description: URL of the matching RevlmPluginSDK linux-amd64 tarball
+        required: true
+        type: string
+      sdk_arm64_url:
+        description: URL of the matching RevlmPluginSDK linux-arm64 tarball
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-module:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            sdk_url: ${{ inputs.sdk_amd64_url }}
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            sdk_url: ${{ inputs.sdk_arm64_url }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download matching RevlmPluginSDK
+        run: |
+          curl --fail --location --retry 3 "${{ matrix.sdk_url }}" -o sdk.tar.gz
+          mkdir sdk
+          tar -xf sdk.tar.gz -C sdk --strip-components=1
+      - name: Build native modules
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/sdk"
+          cmake --build build --parallel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: revlm-plugin-${{ matrix.arch }}
+          path: |
+            build/plugins/OpenAI/libOpenAI.so
+            build/plugins/Anthropic/libAnthropic.so
+          if-no-files-found: error
+
+  package:
+    needs: build-module
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Assemble universal upload packages
+        run: |
+          mkdir -p dist
+          python3 packaging/build-package.py OpenAI \
+            --linux-amd64 artifacts/revlm-plugin-amd64/OpenAI/libOpenAI.so \
+            --linux-arm64 artifacts/revlm-plugin-arm64/OpenAI/libOpenAI.so \
+            --output dist/OpenAI.revlm-plugin
+          python3 packaging/build-package.py Anthropic \
+            --linux-amd64 artifacts/revlm-plugin-amd64/Anthropic/libAnthropic.so \
+            --linux-arm64 artifacts/revlm-plugin-arm64/Anthropic/libAnthropic.so \
+            --output dist/Anthropic.revlm-plugin
+      - name: Publish packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" dist/*.revlm-plugin \
+            --target "${{ github.sha }}" \
+            --title "Revlm plugins ${{ inputs.tag }}" \
+            --generate-notes

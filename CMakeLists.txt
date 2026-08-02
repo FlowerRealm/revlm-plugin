@@ -9,17 +9,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(TARGET revlm_core)
-  # Revlm's own test build embeds this source tree and links the modules to
-  # the just-built host library. Published plugins still use the installed SDK
-  # package below, so this does not loosen the release ABI contract.
-  add_library(RevlmPluginSDK::core ALIAS revlm_core)
+  # Embedded test builds use the exact core being tested. Published modules
+  # use the same exported core library and full header tree.
+  add_library(RevlmCore::core ALIAS revlm_core)
 else()
-  find_package(RevlmPluginSDK CONFIG REQUIRED)
+  find_package(RevlmCore CONFIG REQUIRED)
 endif()
 
 function(revlm_add_plugin target source)
-  add_library(${target} MODULE ${source})
-  target_link_libraries(${target} PRIVATE RevlmPluginSDK::core)
+  # Preload requires a true shared library. CMake MODULE creates a Mach-O
+  # bundle on macOS, which dyld intentionally refuses to insert.
+  add_library(${target} SHARED ${source})
+  target_link_libraries(${target} PRIVATE RevlmCore::core)
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/plugins/common")
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wno-unknown-pragmas)
   set_target_properties(${target} PROPERTIES

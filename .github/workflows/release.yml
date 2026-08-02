@@ -7,12 +7,12 @@ on:
         description: Git tag to create or update, for example v0.1.0
         required: true
         type: string
-      sdk_amd64_url:
-        description: URL of the matching RevlmPluginSDK linux-amd64 tarball
+      core_amd64_url:
+        description: URL of the matching RevlmCore linux-amd64 tarball
         required: true
         type: string
-      sdk_arm64_url:
-        description: URL of the matching RevlmPluginSDK linux-arm64 tarball
+      core_arm64_url:
+        description: URL of the matching RevlmCore linux-arm64 tarball
         required: true
         type: string
 
@@ -27,21 +27,21 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-24.04
-            sdk_url: ${{ inputs.sdk_amd64_url }}
+            core_url: ${{ inputs.core_amd64_url }}
           - arch: arm64
             runner: ubuntu-24.04-arm
-            sdk_url: ${{ inputs.sdk_arm64_url }}
+            core_url: ${{ inputs.core_arm64_url }}
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download matching RevlmPluginSDK
+      - name: Download matching RevlmCore
         run: |
-          curl --fail --location --retry 3 "${{ matrix.sdk_url }}" -o sdk.tar.gz
-          mkdir sdk
-          tar -xf sdk.tar.gz -C sdk --strip-components=1
+          curl --fail --location --retry 3 "${{ matrix.core_url }}" -o core.tar.gz
+          mkdir core
+          tar -xf core.tar.gz -C core --strip-components=1
       - name: Build native modules
         run: |
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/sdk"
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$PWD/core"
           cmake --build build --parallel
       - uses: actions/upload-artifact@v4
         with:

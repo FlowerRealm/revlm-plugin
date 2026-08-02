@@ -1,32 +1,30 @@
 # revlm-plugin
 
-The official V1 data-plane plugins for Revlm:
+The official preload plugins for Revlm:
 
-- `OpenAI`: `GET /v1/models`, `GET /v1/models/:model_id`,
-  `POST /v1/chat/completions`, `POST /v1/responses`, and
-  `POST /v1/responses/input_tokens`.
-- `Anthropic`: `POST /v1/messages`.
+- `OpenAI`: OpenAI-compatible models, Chat Completions, and Responses.
+- `Anthropic`: Messages.
 
-Build against a matching Revlm SDK install:
+This is deliberately not an SDK extension system. A trusted plugin is a normal
+Linux shared library compiled against the full Revlm C++ ABI. At worker start,
+Revlm puts enabled libraries in `LD_PRELOAD`; a plugin can provide the same C++
+symbol as the core and replace it. That includes a small protocol helper, the
+whole upstream executor, or `register_http_routes` itself.
+
+Build against the exact Revlm build you intend to run:
 
 ```bash
 cmake -S /path/to/revlm -B /tmp/revlm-build -DREVLM_BUILD_TESTS=OFF
-cmake --build /tmp/revlm-build --target revlm
-cmake --install /tmp/revlm-build --prefix /tmp/revlm-sdk
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/tmp/revlm-sdk
+cmake --build /tmp/revlm-build --target revlm revlm_worker
+cmake --install /tmp/revlm-build --prefix /tmp/revlm-core
+cmake -S . -B build -DCMAKE_PREFIX_PATH=/tmp/revlm-core
 cmake --build build
 ```
 
 Build one module on Linux `amd64` and one on Linux `arm64`, then package each
-plugin with `packaging/build-package.py`. The script intentionally requires
-both artifacts, because production packages target both supported Revlm Linux
-architectures.
+plugin with `packaging/build-package.py`. The upload artifact requires both
+architectures. The multi-architecture Revlm image instead creates one
+image-local package for its own architecture under `REVLM_SYSTEM_PLUGIN_DIR`.
 
-Revlm's multi-architecture container release also builds one image-local
-system package per image. It uses `--system-target linux-amd64|linux-arm64`
-with the native module; that package deliberately contains only the image's
-own architecture and is never used as an upload artifact. The release Docker
-build expands it with `packaging/install-system-package.py` into the host's
-read-only `REVLM_SYSTEM_PLUGIN_DIR` layout.
-
-See [the V1 format](docs/format-v1.md) for the ABI and lifecycle contract.
+See [the preload format](docs/preload-format.md) for the package, ABI, load
+order, frontend, and lifecycle contract.

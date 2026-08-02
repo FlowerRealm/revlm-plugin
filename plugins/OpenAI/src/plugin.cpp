@@ -1,31 +1,20 @@
-#include <plugins/sdk.hpp>
-
-#include <plugins/gateway.hpp>
+#include <models/catalog.hpp>
+#include <proxy/gateway.hpp>
+#include <proxy/openai_chat.hpp>
+#include <proxy/openai_responses.hpp>
+#include <proxy/upstream.hpp>
 #include <util/json_util.hpp>
 
-#include <algorithm>
 #include <memory>
-#include <stdexcept>
 #include <string_view>
 #include <utility>
 
 #include "protocol_helpers.hpp"
 
-namespace revlm_openai_plugin
+namespace revlm
 {
-
-using namespace revlm;
-
-std::vector<Model> openai_models()
+namespace
 {
-    return {
-        Model(101, "gpt-5.5", "openai", 5, 30, 0.5, 0, 0),
-        Model(102, "gpt-5.4", "openai", 2.5, 15, 0.25, 0, 0),
-        Model(103, "gpt-5.4-mini", "openai", 0.75, 4.5, 0.075, 0, 0),
-        Model(104, "gpt-5.3-codex", "openai", 1.75, 14, 0.175, 0, 0),
-        Model(105, "codex-auto-review", "openai", 2.5, 15, 0.25, 0, 0),
-    };
-}
 
 class OpenAIChatGateway final : public Gateway {
 public:
@@ -162,131 +151,50 @@ protected:
     }
 };
 
-class ModelsHandler final : public plugin::v1::DataPlaneHandler {
-public:
-    plugin::v1::DataPlaneResult handle(plugin::v1::AuthenticatedRequest &request, plugin::v1::ResponseWriter &response,
-                                       plugin::v1::HostServices &host) override
-    {
-        try {
-            response.write_json(200, host.list_models(request.proxy.auth.channel_group_id));
-        } catch (const std::exception &) {
-            response.write_json(502, json("查询模型目录失败"));
-        }
-        return { .commit_usage = false };
-    }
-};
+} // namespace
 
-class ModelHandler final : public plugin::v1::DataPlaneHandler {
-public:
-    plugin::v1::DataPlaneResult handle(plugin::v1::AuthenticatedRequest &request, plugin::v1::ResponseWriter &response,
-                                       plugin::v1::HostServices &host) override
-    {
-        try {
-            const auto it = request.http.path_params.find("model_id");
-            if (it == request.http.path_params.end()) {
-                throw std::runtime_error("missing model_id");
-            }
-            bool not_found = false;
-            json body = host.retrieve_model(it->second, request.proxy.auth.channel_group_id, not_found);
-            response.write_json(not_found ? 404 : 200, std::move(body));
-        } catch (const std::exception &) {
-            response.write_json(502, json("查询模型目录失败"));
-        }
-        return { .commit_usage = false };
-    }
-};
-
-class ChatHandler final : public plugin::v1::DataPlaneHandler {
-public:
-    plugin::v1::DataPlaneResult handle(plugin::v1::AuthenticatedRequest &request, plugin::v1::ResponseWriter &response,
-                                       plugin::v1::HostServices &host) override
-    {
-        ProxyRequest &proxy = request.proxy;
-        proxy.is_stream = parse_json_bool_field(request.http.body, "stream").value_or(false);
-        OpenAIChatGateway gateway(proxy);
-        if (proxy.is_stream) {
-            gateway.run_stream(response.native(), host.stream_usage_callback());
-            return { .handled_stream = true, .commit_usage = false };
-        }
-        response.write_proxy_result(gateway.run());
-        return {};
-    }
-};
-
-class ResponsesHandler final : public plugin::v1::DataPlaneHandler {
-public:
-    explicit ResponsesHandler(bool input_tokens)
-        : input_tokens_(input_tokens)
-    {
-    }
-
-    plugin::v1::DataPlaneResult handle(plugin::v1::AuthenticatedRequest &request, plugin::v1::ResponseWriter &response,
-                                       plugin::v1::HostServices &host) override
-    {
-        ProxyRequest &proxy = request.proxy;
-        proxy.is_stream = !input_tokens_ && parse_json_bool_field(request.http.body, "stream").value_or(false);
-        OpenAIResponsesGateway gateway(proxy);
-        Gateway::StreamOptions options;
-        if (proxy.is_stream) {
-            options.stream_response = &response.native();
-            options.on_usage = host.stream_usage_callback();
-        }
-        const Gateway::HandleResult result = gateway.handle(response.native(), options);
-        if (result.handled_stream) {
-            return { .handled_stream = true, .commit_usage = false };
-        }
-        return { .commit_usage = !input_tokens_ };
-    }
-
-private:
-    bool input_tokens_ = false;
-};
-
-plugin::v1::ChannelTypeDescriptor channel_type()
+std::vector<Model> openai_models()
 {
-    plugin::v1::ChannelTypeDescriptor descriptor;
-    descriptor.type_id = "openai_compatible";
-    descriptor.display_name = "OpenAI";
-    descriptor.icon = "ri-openai-fill";
-    descriptor.default_name = "OpenAI 渠道";
-    descriptor.default_base_url = "https://api.openai.com/v1";
-    descriptor.models = openai_models();
-    descriptor.frontend_schema = json({ { "fields", json::array() } });
-    descriptor.prepare_upstream = [](const Channel &channel, const UpstreamRequest &, UpstreamPreparedRequest &prepared) {
-        revlm_plugin_common::prepare_common_headers(prepared);
-        revlm_plugin_common::set_header(prepared.headers, "Authorization", "Bearer " + channel.api_key);
+    return {
+        Model(101, "gpt-5.5", "openai", 5, 30, 0.5, 0, 0),
+        Model(102, "gpt-5.4", "openai", 2.5, 15, 0.25, 0, 0),
+        Model(103, "gpt-5.4-mini", "openai", 0.75, 4.5, 0.075, 0, 0),
+        Model(104, "gpt-5.3-codex", "openai", 1.75, 14, 0.175, 0, 0),
+        Model(105, "codex-auto-review", "openai", 2.5, 15, 0.25, 0, 0),
     };
-    return descriptor;
 }
 
-class OpenAIPlugin final : public plugin::v1::Plugin {
-public:
-    void register_with(plugin::v1::PluginRegistrar &registrar) override
-    {
-        registrar.register_channel_type(channel_type());
-        registrar.register_data_plane_route({ "GET", "/v1/models", false, false }, models_);
-        registrar.register_data_plane_route({ "GET", "/v1/models/:model_id", false, false }, model_);
-        registrar.register_data_plane_route({ "POST", "/v1/chat/completions", true, true }, chat_);
-        registrar.register_data_plane_route({ "POST", "/v1/responses", true, true }, responses_);
-        registrar.register_data_plane_route({ "POST", "/v1/responses/input_tokens", true, false }, input_tokens_);
-    }
-
-private:
-    ModelsHandler models_;
-    ModelHandler model_;
-    ChatHandler chat_;
-    ResponsesHandler responses_{ false };
-    ResponsesHandler input_tokens_{ true };
-};
-
-} // namespace revlm_openai_plugin
-
-extern "C" revlm::plugin::v1::Plugin *revlm_plugin_create_v1()
+void prepare_openai_upstream(const Channel &channel, const UpstreamRequest &, UpstreamPreparedRequest &prepared)
 {
-    return new revlm_openai_plugin::OpenAIPlugin();
+    revlm_plugin_common::prepare_common_headers(prepared);
+    revlm_plugin_common::set_header(prepared.headers, "Authorization", "Bearer " + channel.api_key);
 }
 
-extern "C" void revlm_plugin_destroy_v1(revlm::plugin::v1::Plugin *plugin)
+bool retry_openai_unsupported_parameter()
 {
-    delete plugin;
+    return true;
 }
+
+json run_chat_completions(ProxyRequest &request)
+{
+    return OpenAIChatGateway(request).run();
+}
+
+void run_chat_completions_stream(::httplib::Response &response, ProxyRequest request,
+                                 const std::function<void(ProxyRequest &)> &on_usage)
+{
+    OpenAIChatGateway(request).run_stream(response, on_usage);
+}
+
+ResponsesProxyResult handle_responses_proxy_request(ProxyRequest &request, ::httplib::Response &response)
+{
+    return handle_responses_proxy_request(request, response, ResponsesProxyExecuteOptions{});
+}
+
+ResponsesProxyResult handle_responses_proxy_request(ProxyRequest &request, ::httplib::Response &response,
+                                                    const ResponsesProxyExecuteOptions &options)
+{
+    return OpenAIResponsesGateway(request).handle(response, options);
+}
+
+} // namespace revlm

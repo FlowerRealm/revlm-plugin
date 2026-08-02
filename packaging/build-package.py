@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a deterministic V1 .revlm-plugin ZIP from two precompiled modules."""
+"""Build a format-v2 .revlm-plugin ZIP from two precompiled modules."""
 
 from __future__ import annotations
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a format-v2 .revlm-plugin ZIP from two precompiled modules."""
+"""Build a format-v2 .revlm-plugin ZIP from precompiled modules."""
 
 from __future__ import annotations
 
@@ -21,9 +21,20 @@ def add_tree(archive: zipfile.ZipFile, source: pathlib.Path, destination: pathli
         archive.write(path, (destination / path.relative_to(source)).as_posix())
 
 
+def target_for(manifest: dict[str, object], os_name: str, arch: str) -> dict[str, object]:
+    matches = [
+        target
+        for target in manifest.get("targets", [])
+        if isinstance(target, dict) and target.get("os") == os_name and target.get("arch") == arch
+    ]
+    if len(matches) != 1 or not isinstance(matches[0].get("module"), str):
+        raise SystemExit(f"manifest has no unique module for {os_name}-{arch}")
+    return matches[0]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("plugin", choices=("OpenAI", "Anthropic"))
+    parser.add_argument("plugin", help="directory name below plugins/")
     parser.add_argument("--linux-amd64", type=pathlib.Path)
     parser.add_argument("--linux-arm64", type=pathlib.Path)
     parser.add_argument(
@@ -36,6 +47,14 @@ def main() -> None:
     args = parser.parse_args()
 
     source = ROOT / "plugins" / args.plugin
+    if not source.is_dir():
+        raise SystemExit(f"plugin source directory does not exist: {source}")
+    try:
+        manifest = json.loads((source / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise SystemExit(f"invalid plugin manifest: {error}") from error
+    if not isinstance(manifest, dict):
+        raise SystemExit("plugin manifest must be an object")
     if args.system_target:
         if args.linux_amd64 or args.linux_arm64 or not args.module or not args.module.is_file():
             raise SystemExit("--system-target requires exactly --module <compiled shared library>")
@@ -45,29 +64,24 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f"revlm-{args.plugin}-") as temporary:
         stage = pathlib.Path(temporary)
-        manifest = json.loads((source / "plugin.json").read_text(encoding="utf-8"))
         if args.system_target:
             target_os, target_arch = args.system_target.split("-", 1)
-            targets = [
-                target
-                for target in manifest["targets"]
-                if target["os"] == target_os and target["arch"] == target_arch
-            ]
-            if len(targets) != 1:
-                raise SystemExit(f"manifest has no unique target for {args.system_target}")
-            manifest["targets"] = targets
+            target = target_for(manifest, target_os, target_arch)
+            manifest["targets"] = [target]
         (stage / "plugin.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        shutil.copytree(source / "frontend", stage / "frontend")
+        frontend = source / "frontend"
+        if frontend.is_dir():
+            shutil.copytree(frontend, stage / "frontend")
         migrations = source / "migrations"
         if migrations.exists():
             shutil.copytree(migrations, stage / "migrations")
         if args.system_target:
-            target = stage / "backend" / args.system_target / f"lib{args.plugin}.so"
-            target.parent.mkdir(parents=True)
-            shutil.copy2(args.module, target)
+            module = stage / target["module"]
+            module.parent.mkdir(parents=True)
+            shutil.copy2(args.module, module)
         else:
-            amd64_target = stage / "backend" / "linux-amd64" / f"lib{args.plugin}.so"
-            arm64_target = stage / "backend" / "linux-arm64" / f"lib{args.plugin}.so"
+            amd64_target = stage / target_for(manifest, "linux", "amd64")["module"]
+            arm64_target = stage / target_for(manifest, "linux", "arm64")["module"]
             amd64_target.parent.mkdir(parents=True)
             arm64_target.parent.mkdir(parents=True)
             shutil.copy2(args.linux_amd64, amd64_target)

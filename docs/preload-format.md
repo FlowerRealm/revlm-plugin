@@ -41,7 +41,7 @@ migrations/0001_initial.sql       # 可选；只进不退
   "id": "Example",
   "name": "Example",
   "version": "0.1.0",
-  "core_abi": "revlm-core-preload-v1",
+  "core_abi": "revlm-core-preload-v2",
   "requires": [],
   "load_order": 0,
   "targets": [
@@ -67,22 +67,30 @@ migrations/0001_initial.sql       # 可选；只进不退
 
 ## 写原生替换
 
-安装完整 Revlm core 后，插件直接包含它需要的真实头文件并提供完全相同的普通 C++ 定义：
+安装完整 Revlm core 后，插件直接包含它需要的真实头文件并提供完全相同的普通 C++ 定义。首批
+协议插件用 C linkage 只固定 `dlsym(RTLD_NEXT, ...)` 的符号名字；参数和实现仍是完整 C++ ABI，
+并不是 SDK 回调：
 
 ```cpp
-#include <proxy/openai_chat.hpp>
+#include <models/catalog.hpp>
 
 namespace revlm {
 
-json run_chat_completions(ProxyRequest& request) {
-    // Your implementation. It has the same ABI as the core declaration.
+extern "C" void revlm_models_for_channel_type(std::string_view type,
+                                                std::vector<Model>& models) {
+    if (type == "my_provider") {
+        models = { /* this provider's catalog */ };
+        return;
+    }
+    // Optional: use RTLD_NEXT to continue the ordinary ELF symbol chain.
 }
 
 } // namespace revlm
 ```
 
-也可以直接覆盖 `UpstreamExecutor::prepare`、`ChannelStore` 的公开方法、计费代码、
-`register_http_routes`，甚至自行启动另一套运行逻辑。核心不规定允许列表。相反，`static` 函数、
+官方 Anthropic 插件在同一个 `.so` 中同时定义模型、`/v1/messages`、上游头和 SSE/用量处理；它
+不是给核心里的 `anthropic_*` 槽填值。也可以直接覆盖 `UpstreamExecutor::prepare`、`ChannelStore`
+的公开方法、计费代码、`revlm_register_http_routes`，甚至自行启动另一套运行逻辑。核心不规定允许列表。相反，`static` 函数、
 内联后不产生可抢占符号的函数、隐藏可见性符号和没有走动态链接的代码，本来就无法被
 `LD_PRELOAD` 替换；这是 ELF/C++ 的物理限制，不是 Revlm 的权限限制。
 
@@ -130,5 +138,6 @@ python3 packaging/build-package.py OpenAI \
   --output dist/OpenAI.revlm-plugin
 ```
 
-CI 必须在 Linux 上以真实 `LD_PRELOAD` 启动 probe 和集成测试；macOS 的 Mach-O 两级符号绑定
+`build-package.py` 不限制插件 ID；它读取任意 `plugins/<目录>/plugin.json` 的 target 路径并把给定
+模块放进去。CI 必须在 Linux 上以真实 `LD_PRELOAD` 启动 probe 和集成测试；macOS 的 Mach-O 两级符号绑定
 不是该运行模型，不能把本地 macOS 成功编译误当成 Linux 替换验证。

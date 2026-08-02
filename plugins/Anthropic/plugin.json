@@ -3,7 +3,7 @@
   "id": "Anthropic",
   "name": "Anthropic",
   "version": "0.1.0",
-  "core_abi": "revlm-core-preload-v1",
+  "core_abi": "revlm-core-preload-v2",
   "requires": [],
   "targets": [
     { "os": "linux", "arch": "amd64", "module": "backend/linux-amd64/libAnthropic.so" },

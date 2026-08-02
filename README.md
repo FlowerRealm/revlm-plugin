@@ -9,7 +9,9 @@ This is deliberately not an SDK extension system. A trusted plugin is a normal
 Linux shared library compiled against the full Revlm C++ ABI. At worker start,
 Revlm puts enabled libraries in `LD_PRELOAD`; a plugin can provide the same C++
 symbol as the core and replace it. That includes a small protocol helper, the
-whole upstream executor, or `register_http_routes` itself.
+whole upstream executor, or `revlm_register_http_routes` itself. The official
+modules each own their own model catalog, route(s), protocol conversion, and
+stream/usage behavior; the core has no OpenAI or Anthropic branch.
 
 Build against the exact Revlm build you intend to run:
 

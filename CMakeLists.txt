@@ -20,7 +20,7 @@ function(revlm_add_plugin target source)
   # Preload requires a true shared library. CMake MODULE creates a Mach-O
   # bundle on macOS, which dyld intentionally refuses to insert.
   add_library(${target} SHARED ${source})
-  target_link_libraries(${target} PRIVATE RevlmCore::core)
+  target_link_libraries(${target} PRIVATE RevlmCore::core ${CMAKE_DL_LIBS})
   target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/plugins/common")
   target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Wno-unknown-pragmas)
   set_target_properties(${target} PROPERTIES

@@ -1,20 +1,59 @@
 #include <models/catalog.hpp>
-#include <proxy/anthropics_messages.hpp>
 #include <proxy/gateway.hpp>
 #include <proxy/upstream.hpp>
+#include <server/http_dispatch.hpp>
+#include <server/http_server.hpp>
 #include <util/json_util.hpp>
 #include <util/strings.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
+#include "preload_chain.hpp"
 #include "protocol_helpers.hpp"
 
 namespace revlm
 {
 namespace
 {
+
+constexpr std::string_view k_channel_type = "anthropic";
+
+using NextRouteSetup = void (*)(::httplib::Server &, const std::shared_ptr<std::atomic_bool> &);
+using NextModelsForType = void (*)(std::string_view, std::vector<Model> &);
+using NextAllModels = void (*)(std::vector<Model> &);
+using NextPrepareUpstream = void (*)(const Channel &, const UpstreamRequest &, UpstreamPreparedRequest &);
+using NextRetryUpstream = bool (*)(const Channel &, const UpstreamPreparedRequest &, const UpstreamResponse &,
+                                   UpstreamPreparedRequest &);
+
+std::vector<Model> catalog()
+{
+    return {
+        Model(201, "claude-opus-4-8", "anthropic", 5, 25, 0.5, 10, 6.25, "/assets/model-icons/claude-color.svg"),
+        Model(202, "claude-opus-4-7", "anthropic", 5, 25, 0.5, 10, 6.25, "/assets/model-icons/claude-color.svg"),
+        Model(203, "claude-opus-4-6", "anthropic", 5, 25, 0.5, 10, 6.25, "/assets/model-icons/claude-color.svg"),
+        Model(204, "claude-haiku-4-5-20251001", "anthropic", 1, 5, 0.1, 2, 1.25,
+              "/assets/model-icons/claude-color.svg"),
+        Model(205, "claude-sonnet-4-6", "anthropic", 3, 15, 0.3, 6, 3.75, "/assets/model-icons/claude-color.svg"),
+        Model(206, "claude-sonnet-5", "anthropic", 2, 10, 0.2, 4, 3.75, "/assets/model-icons/claude-color.svg"),
+    };
+}
+
+void append_unique_models(std::vector<Model> &models, const std::vector<Model> &extra)
+{
+    for (const Model &model : extra) {
+        const auto duplicate = std::find_if(models.begin(), models.end(),
+                                            [&](const Model &current) { return current.name == model.name; });
+        if (duplicate == models.end()) {
+            models.push_back(model);
+        }
+    }
+}
 
 class AnthropicMessagesGateway final : public Gateway {
 public:
@@ -53,7 +92,7 @@ public:
 protected:
     bool channel_ok(const Channel &channel) const override
     {
-        return channel.status && channel.type == "anthropic" && !channel.api_key.empty();
+        return channel.status && channel.type == k_channel_type && !channel.api_key.empty();
     }
 
     GatewayFactory usage_gateway_factory() const override
@@ -67,25 +106,63 @@ protected:
     }
 };
 
-} // namespace
-
-std::vector<Model> anthropic_models()
+void register_anthropic_routes(::httplib::Server &server)
 {
-    return {
-        Model(201, "claude-opus-4-8", "anthropic", 5, 25, 0.5, 10, 6.25),
-        Model(202, "claude-opus-4-7", "anthropic", 5, 25, 0.5, 10, 6.25),
-        Model(203, "claude-opus-4-6", "anthropic", 5, 25, 0.5, 10, 6.25),
-        Model(204, "claude-haiku-4-5-20251001", "anthropic", 1, 5, 0.1, 2, 1.25),
-        Model(205, "claude-sonnet-4-6", "anthropic", 3, 15, 0.3, 6, 3.75),
-        Model(206, "claude-sonnet-5", "anthropic", 2, 10, 0.2, 4, 3.75),
-    };
+    server.Post("/v1/messages",
+                v1_http([](const ::httplib::Request &req, ::httplib::Response &res, ProxyRequest &proxy) {
+                    if (const auto quota_error = paygo_balance_gate(proxy.auth.user_id); quota_error.has_value()) {
+                        write_json(res, 402, *quota_error);
+                        return;
+                    }
+                    proxy.is_stream = parse_json_bool_field(req.body, "stream").value_or(false);
+                    if (proxy.is_stream) {
+                        AnthropicMessagesGateway(proxy).run_stream(res, proxy_stream_commit_usage);
+                        return;
+                    }
+                    write_proxy_result(res, AnthropicMessagesGateway(proxy).run());
+                    finish_proxy_usage(res, proxy);
+                }));
 }
 
-void prepare_anthropic_upstream(const Channel &channel, const UpstreamRequest &downstream,
-                                UpstreamPreparedRequest &prepared)
+} // namespace
+
+extern "C" void revlm_models_for_channel_type(std::string_view channel_type, std::vector<Model> &models)
 {
+    if (channel_type == k_channel_type) {
+        models = catalog();
+        return;
+    }
+    if (const auto next = revlm_plugin_common::next_symbol<NextModelsForType>("revlm_models_for_channel_type");
+        next != nullptr) {
+        next(channel_type, models);
+        return;
+    }
+    models.clear();
+}
+
+extern "C" void revlm_all_models(std::vector<Model> &models)
+{
+    if (const auto next = revlm_plugin_common::next_symbol<NextAllModels>("revlm_all_models"); next != nullptr) {
+        next(models);
+    } else {
+        models.clear();
+    }
+    append_unique_models(models, catalog());
+}
+
+extern "C" void revlm_prepare_upstream(const Channel &channel, const UpstreamRequest &downstream,
+                                       UpstreamPreparedRequest &prepared)
+{
+    if (channel.type != k_channel_type) {
+        if (const auto next = revlm_plugin_common::next_symbol<NextPrepareUpstream>("revlm_prepare_upstream");
+            next != nullptr) {
+            next(channel, downstream, prepared);
+            return;
+        }
+        throw std::runtime_error("no plugin prepared this upstream request");
+    }
     if (downstream.path != "/v1/messages") {
-        throw std::invalid_argument("anthropic upstream only supports /v1/messages");
+        throw std::invalid_argument("Anthropic upstream only supports /v1/messages");
     }
     revlm_plugin_common::prepare_common_headers(prepared);
     if (trim_ascii(revlm_plugin_common::header_value(prepared.headers, "anthropic-version")).empty()) {
@@ -94,20 +171,26 @@ void prepare_anthropic_upstream(const Channel &channel, const UpstreamRequest &d
     revlm_plugin_common::set_header(prepared.headers, "x-api-key", channel.api_key);
 }
 
-bool retry_anthropic_unsupported_parameter()
+extern "C" bool revlm_retry_upstream_request(const Channel &channel, const UpstreamPreparedRequest &prepared,
+                                             const UpstreamResponse &response, UpstreamPreparedRequest &retry)
 {
+    if (channel.type == k_channel_type) {
+        return false;
+    }
+    if (const auto next = revlm_plugin_common::next_symbol<NextRetryUpstream>("revlm_retry_upstream_request");
+        next != nullptr) {
+        return next(channel, prepared, response, retry);
+    }
     return false;
 }
 
-json run_messages(ProxyRequest &request)
+extern "C" void revlm_register_http_routes(::httplib::Server &server, const std::shared_ptr<std::atomic_bool> &draining)
 {
-    return AnthropicMessagesGateway(request).run();
-}
-
-void run_messages_stream(::httplib::Response &response, ProxyRequest request,
-                         const std::function<void(ProxyRequest &)> &on_usage)
-{
-    AnthropicMessagesGateway(request).run_stream(response, on_usage);
+    if (const auto next = revlm_plugin_common::next_symbol<NextRouteSetup>("revlm_register_http_routes");
+        next != nullptr) {
+        next(server, draining);
+    }
+    register_anthropic_routes(server);
 }
 
 } // namespace revlm

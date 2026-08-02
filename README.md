@@ -25,6 +25,8 @@ architectures.
 Revlm's multi-architecture container release also builds one image-local
 system package per image. It uses `--system-target linux-amd64|linux-arm64`
 with the native module; that package deliberately contains only the image's
-own architecture and is never used as an upload artifact.
+own architecture and is never used as an upload artifact. The release Docker
+build expands it with `packaging/install-system-package.py` into the host's
+read-only `REVLM_SYSTEM_PLUGIN_DIR` layout.
 
 See [the V1 format](docs/format-v1.md) for the ABI and lifecycle contract.

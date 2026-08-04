@@ -1,26 +1,21 @@
 # revlm-plugin
 
-The official V1 data-plane plugins for Revlm:
+The official channel data-plane plugins for Revlm (plugins v3 architecture):
 
-- `OpenAI`: `GET /v1/models`, `GET /v1/models/:model_id`,
-  `POST /v1/chat/completions`, `POST /v1/responses`, and
-  `POST /v1/responses/input_tokens`.
-- `Anthropic`: `POST /v1/messages`.
+- `OpenAI`: `ChannelGroup.type == "openai_compatible"`, handles
+  `GET /v1/models`, `GET /v1/models/:id`, `POST /v1/chat/completions`,
+  `POST /v1/responses`, and `POST /v1/responses/input_tokens`.
+- `Anthropic`: `ChannelGroup.type == "anthropic"`, handles `POST /v1/messages`.
 
-Build against a matching Revlm SDK install:
+Each plugin is an `LD_PRELOAD` module that provides `extern "C" revlm_handle_v1`
+(the single /v1 data-plane hook), plus the interposable upstream-prepare and
+model-catalog symbols. Non-matching `ChannelGroup.type` chains via
+`dlsym(RTLD_NEXT)`.
 
-```bash
-cmake -S /path/to/revlm -B /tmp/revlm-build -DREVLM_BUILD_TESTS=OFF
-cmake --build /tmp/revlm-build --target revlm
-cmake --install /tmp/revlm-build --prefix /tmp/revlm-sdk
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/tmp/revlm-sdk
-cmake --build build
-```
-
-Build one module on Linux `amd64` and one on Linux `arm64`, then package each
-plugin with `packaging/build-package.py`. The script intentionally requires
-both artifacts, because production packages target both supported Revlm Linux
-architectures.
+Build the modules against the host core headers (a matching Revlm checkout or
+an installed RevlmCore package), then package each plugin with
+`packaging/build-package.py`. The script intentionally requires both artifacts,
+because production packages must contain `backend/amd` and `backend/arm`.
 
 Revlm's multi-architecture container release also builds one image-local
 system package per image. It uses `--system-target linux-amd64|linux-arm64`
@@ -29,4 +24,4 @@ own architecture and is never used as an upload artifact. The release Docker
 build expands it with `packaging/install-system-package.py` into the host's
 read-only `REVLM_SYSTEM_PLUGIN_DIR` layout.
 
-See [the V1 format](docs/format-v1.md) for the ABI and lifecycle contract.
+See [the package format](docs/format-v1.md) for the ABI and lifecycle contract.

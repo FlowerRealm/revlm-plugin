@@ -8,11 +8,11 @@ on:
         required: true
         type: string
       sdk_amd64_url:
-        description: URL of the matching RevlmPluginSDK linux-amd64 tarball
+        description: URL of the matching RevlmCore linux-amd64 tarball
         required: true
         type: string
       sdk_arm64_url:
-        description: URL of the matching RevlmPluginSDK linux-arm64 tarball
+        description: URL of the matching RevlmCore linux-arm64 tarball
         required: true
         type: string
 
@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-      - name: Download matching RevlmPluginSDK
+      - name: Download matching RevlmCore
         run: |
           curl --fail --location --retry 3 "${{ matrix.sdk_url }}" -o sdk.tar.gz
           mkdir sdk

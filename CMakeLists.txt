@@ -10,11 +10,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(TARGET revlm_core)
   # Revlm's own test build embeds this source tree and links the modules to
-  # the just-built host library. Published plugins still use the installed SDK
-  # package below, so this does not loosen the release ABI contract.
+  # the just-built host library. Published plugins still use the installed
+  # RevlmCore package below, so this does not loosen the release ABI contract.
   add_library(RevlmPluginSDK::core ALIAS revlm_core)
 else()
-  find_package(RevlmPluginSDK CONFIG REQUIRED)
+  find_package(RevlmCore CONFIG REQUIRED)
+  add_library(RevlmPluginSDK::core ALIAS RevlmCore::core)
 endif()
 
 function(revlm_add_plugin target source)

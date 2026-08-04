@@ -1,14 +1,7 @@
 {
-  "format_version": 1,
   "id": "OpenAI",
+  "type": "channel",
   "name": "OpenAI",
-  "version": "0.1.0",
-  "sdk_abi": "revlm-plugin-cpp-v1",
-  "requires": [],
-  "targets": [
-    { "os": "linux", "arch": "amd64", "module": "backend/linux-amd64/libOpenAI.so" },
-    { "os": "linux", "arch": "arm64", "module": "backend/linux-arm64/libOpenAI.so" }
-  ],
-  "frontend_schema": "frontend/channel-types.json",
-  "migrations": []
+  "description": "OpenAI 协议插件（v1/chat/completions、v1/responses、v1/models）",
+  "version": "0.2.0"
 }

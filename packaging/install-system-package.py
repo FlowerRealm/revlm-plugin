@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install one image-local .revlm-plugin under packages/<id>/<version>."""
+"""Install one image-local .revlm-plugin under packages/<id>/ (v3 single-dir layout)."""
 
 from __future__ import annotations
 
@@ -32,11 +32,15 @@ def main() -> None:
         except (KeyError, json.JSONDecodeError) as error:
             raise SystemExit(f"invalid plugin package manifest: {error}") from error
         plugin_id = manifest.get("id")
-        version = manifest.get("version")
-        if not isinstance(plugin_id, str) or not isinstance(version, str) or not safe_component(plugin_id) or not safe_component(version):
-            raise SystemExit("plugin package has an unsafe id or version")
+        if not isinstance(plugin_id, str) or not safe_component(plugin_id):
+            raise SystemExit("plugin package has an unsafe id")
 
-        destination = args.root / "packages" / plugin_id / version
+        # v3: single-directory package at packages/<id>/; an image-local system
+        # package replaces whatever the image previously shipped for this id.
+        destination = args.root / "packages" / plugin_id
+        if destination.exists():
+            import shutil
+            shutil.rmtree(destination)
         destination.mkdir(parents=True, exist_ok=False)
         for member in archive.infolist():
             if member.is_dir():
